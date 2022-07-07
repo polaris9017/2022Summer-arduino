@@ -5,6 +5,8 @@
 #include <Wire.h>
 #include <SoftwareSerial.h>
 #include <LiquidCrystal_I2C.h>  // LCD Display library
+#include <nRF24L01.h>
+#include <RF24.h>
 
 #define ONE_WIRE_BUS 2
 #define LIGHT_SENSOR_BUS 0
@@ -25,6 +27,11 @@ LiquidCrystal_I2C lcd(0x3f, 16, 2);  // set the LCD address to 0x27 for a 16 cha
 
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature tempSensor(&oneWire);
+
+RF24 radio(8, 10);
+
+const byte addr[6] = "R0001";
+static String msg = "QWxlcnQhIQ==";  // alert message
 
 // Clear line on display
 void clearLine(int line) {
@@ -105,7 +112,17 @@ bool detect_light_warning() {
     return false;
 }
 
+// initialize RF module
+void init_radio() {
+    radio.begin();
+    radio.openWritingPipe(addr);
+    radio.setPALevel(RF24_PA_MIN);
+    radio.stopListening();
+}
+
 void setup() {
+    Serial.begin(9600);  //baud rate
+
     lcd.init();
     lcd.backlight();
 
@@ -116,7 +133,7 @@ void setup() {
     pinMode(LED_PIN_GREEN, OUTPUT);
     led_init_test();
 
-    Serial.begin(9600);  //baud rate
+    init_radio();
 }
 
 // Add the main program code into the continuous loop() function
@@ -125,6 +142,8 @@ void loop() {
     display("Light: " + String(get_light_level()), 1, 0);
 
     if (detect_light_warning() && detect_temp_warning()) {
+        radio.write(&msg, msg.length());
+
         clearLine(0);
         clearLine(1);
         display("Fire!", 0, 0);
