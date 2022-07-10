@@ -3,16 +3,19 @@
 #include <Arduino.h>
 #include <SoftwareSerial.h>
 #include <LiquidCrystal_I2C.h>  // LCD Display library
-#include <nRF24L01.h>
-#include <RF24.h>
 
 #define LCD_CHARS 16
+#define RSSI_LIMIT -90
 
-SoftwareSerial BSerial(5, 6); //BLE module | Tx to 5, Rx to 6
-LiquidCrystal_I2C lcd(0x3f, 16, 2);  // set the LCD address to 0x27 for a 16 chars and 2 line display
-RF24 radio(8, 10);
+const int nPin_BTTx = 2;  //ì „ì†¡
+const int nPin_BTRx = 3;  //ìˆ˜ì‹ 
 
-const byte addr[6] = "R0001";
+const String addr_Beacon1 = "D4:36:39:69:8C:3A";
+const String addr_Beacon2 = "78:04:73:B7:A6:12";
+const String addr_Beacon3 = "78:04:73:B7:E4:35";
+
+SoftwareSerial BSerial(nPin_BTTx, nPin_BTRx);  // RX, TX
+LiquidCrystal_I2C lcd(0x27, 16, 2);            // set the LCD address to 0x27 for a 16 chars and 2 line display
 
 // Clear line on display
 void clearLine(int line) {
@@ -36,42 +39,86 @@ void display(String msg, int line, int pos) {  // print to display
 
 // set BLE module to scan mode
 void scan_ble() {
-    Serial.println("Setting BLE module to scan mode");
-    delay(1000);
-    BSerial.println("AT+SCAN");  //Scan mode
+    display("BLE module scan", 0, 0);
+    delay(500);
+    BSerial.println("AT+CLIENT=O");
+    delay(500);
+    BSerial.println("AT+SCANINTERVAL=2000");
+    delay(500);
+    BSerial.println("AT+SCAN=0");  //Scan mode
+    display("BLE scan set!", 0, 0);
 }
 
-// initialize RF module
-void init_radio() {
-    radio.begin();
-    radio.openReadingPipe(0, addr);
-    radio.setPALevel(RF24_PA_MIN);
-    radio.startListening();
+// initialize LCD display
+void init_lcd() {
+    lcd.init();  // initialize the lcd
+    lcd.backlight();
+}
+
+String getRSSI(const String &msg) {
+    int idx = msg.indexOf("RSSI[");;
+    return msg.substring(idx + 5, idx + 8);
+}
+
+// determine location
+char getLocation(const int *p) {
+    if (p[0] > RSSI_LIMIT && p[1] < RSSI_LIMIT && p[2] < RSSI_LIMIT) return 'A';
+    else if (p[0] < RSSI_LIMIT && p[1] > RSSI_LIMIT && p[2] < RSSI_LIMIT) return 'B';
+    else if (p[0] < RSSI_LIMIT && p[1] < RSSI_LIMIT && p[2] > RSSI_LIMIT) return 'C';
+    else if (p[0] > RSSI_LIMIT && p[1] > RSSI_LIMIT && p[2] < RSSI_LIMIT) return 'D';
+    else if (p[0] > RSSI_LIMIT && p[1] < RSSI_LIMIT && p[2] > RSSI_LIMIT) return 'E';
+    else if (p[0] < RSSI_LIMIT && p[1] > RSSI_LIMIT && p[2] > RSSI_LIMIT) return 'F';
+    else if (p[0] > RSSI_LIMIT && p[1] > RSSI_LIMIT && p[2] > RSSI_LIMIT) return 'G';
+
+    return 0;
+}
+
+// determine direction
+String getDirection(const char loc) {
+    switch (loc) {
+        case 'A':
+        case 'E':
+        case 'G':
+            return "N";
+        case 'B':
+            return "NNE";
+        case 'C':
+            return "NNW";
+        case 'D':
+            return "E";
+        case 'F':
+            return "W";
+        default:
+            return "";
+    }
 }
 
 void setup() {
-    // write your initialization code here
     Serial.begin(9600);
-    Serial.println("Initializing...");
     BSerial.begin(9600);
 
+    init_lcd();
     scan_ble();
-    init_radio();
 }
 
 void loop() {
-    // write your code here
-    if (radio.available()) {
-        String msg;
-        radio.read(&msg, 32 * sizeof(char));
-        if (msg.equals("QWxlcnQhIQ==")) { // received alert message
-            if (BSerial.available()) {
-                String readVal = BSerial.readString();
-                Serial.println("Recieved : " + readVal);
-                delay(100);
+    String val = "";
+    int strength[3] = {};
+    if (BSerial.available()) {
+        val = BSerial.readString();
 
-                //ÀÏ´Ü ¾ÆµÎÀÌ³ë¿¡ ºí·çÅõ½º ¸ðµâ ¹°·Á¼­ Ãâ·Â°ª È®ÀÎÇÏ°í ±¸ÇöÇÒ °Í
-            }
-        }
+        int idx_addr = 6;
+        String addr = val.substring(idx_addr + 2, idx_addr + 18);
+
+        String rssi = getRSSI(val);
+
+        if (addr == addr_Beacon1) strength[0] = rssi.toInt();
+        else if (addr == addr_Beacon2) strength[1] = rssi.toInt();
+        else if (addr == addr_Beacon3) strength[2] = rssi.toInt();
+
+        //display(addr, 0, 0);
+        char loc = getLocation(strength);
+        display("RSSI = " + rssi, 1, 0);
+        display("DIRECTION = " + getDirection(loc), 0, 0);
     }
 }
